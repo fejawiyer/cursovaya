@@ -1,0 +1,17 @@
+{
+    "x_size": "50",
+    "y_size": "50",
+    "t": "30",
+    "x_step": "1",
+    "y_step": "1",
+    "t_step": "0.1",
+    "dx": "0.5",
+    "wind_v": "5",
+    "intensity": "10",
+    "wind_u": "10",
+    "dy": "0.5",
+    "save_name": "2",
+    "initial_conditions": "C:/Users/user/PycharmProjects/cursovaya/3.json",
+    "update_conc": true,
+    "show_wind": true
+}
