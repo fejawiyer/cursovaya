@@ -1,42 +1,55 @@
 import numpy as np
-from matplotlib import pyplot as plt, animation, colors
-from matplotlib.colors import BoundaryNorm
-from matplotlib.ticker import MultipleLocator, FixedLocator
+from PyQt5.QtWidgets import QMessageBox
+from matplotlib import pyplot as plt
+from matplotlib.animation import PillowWriter, FuncAnimation
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+from matplotlib.colors import BoundaryNorm, ListedColormap
+from matplotlib.ticker import FixedLocator
 
 
-class MPCPlot:
-    def __init__(self, anim_int, repeat, x_size, y_size, mpc, zoning=False):
-        plt.switch_backend('Qt5Agg')
+class MPCAnimation:
+    def __init__(self, anim_int, repeat, x_size, y_size, mpc,
+                 output_file=None, progress_bar=None, zoning=False):
+        backend = 'Agg' if output_file is not None else 'Qt5Agg'
+        plt.switch_backend(backend)
         plt.close('all')
 
-        self.fig = plt.figure(figsize=(10, 8))
-        self.ax = self.fig.add_subplot(111)
+        self.fig, self.ax = plt.subplots(figsize=(10, 8))
+        if output_file is not None:
+            self.canvas = FigureCanvasAgg(self.fig)
 
         self.anim_int = anim_int
         self.repeat = repeat
         self.x_size = x_size
         self.y_size = y_size
-        self.mpc = mpc  # Предельно допустимая концентрация
-        self.zoning = zoning  # Флаг для гладких зон
+        self.mpc = mpc
+        self.output_file = output_file
+        self.progress_bar = progress_bar
+        self.zoning = zoning
 
-        data = np.load("model.npz")
-        self.c_list = data['res']
+        self.c_list = np.load("model.npz")['res']
+        self.total_frames = len(self.c_list)
 
         self._setup_zones()
 
         self.ani = None
         self.im = None
         self.cbar = None
+        self.mpc_line = None
+
+        if progress_bar and output_file is not None:
+            progress_bar.setRange(0, 100)
+            progress_bar.setValue(0)
 
     def _setup_zones(self):
         self.zones = {
-            'levels': [0, 0.5, 1.0, 2.0, 5.0],  # В долях от ПДК
+            'levels': [0, 0.5, 1.0, 2.0, 5.0],  # В долях от MPC
             'colors': ['#4CAF50', '#FFEB3B', '#FF9800', '#F44336'],
             'labels': [
-                'Ниже 0.5 ПДК',
-                '0.5-1 ПДК',
-                '1-2 ПДК',
-                'Выше 2 ПДК'
+                'Ниже 0.5 MPC (безопасно)',
+                '0.5-1 MPC (допустимо)',
+                '1-2 MPC (опасно)',
+                'Выше 2 MPC (критично)'
             ]
         }
 
@@ -44,7 +57,6 @@ class MPCPlot:
         return [level * self.mpc for level in self.zones['levels']]
 
     def _setup_axes(self):
-        # Настройка осей с ограничением количества тиков (максимум 10)
         max_ticks = 10
         x_ticks = np.linspace(0, self.x_size, min(max_ticks, self.x_size))
         y_ticks = np.linspace(0, self.y_size, min(max_ticks, self.y_size))
@@ -52,7 +64,6 @@ class MPCPlot:
         self.ax.xaxis.set_major_locator(FixedLocator(x_ticks))
         self.ax.yaxis.set_major_locator(FixedLocator(y_ticks))
 
-        # Добавляем сетку
         self.ax.grid(which='major', color='black', linestyle=':', alpha=0.3)
         self.ax.set_xlabel('X координата, м')
         self.ax.set_ylabel('Y координата, м')
@@ -61,13 +72,10 @@ class MPCPlot:
         current_data = self.c_list[it]
 
         if self.zoning:
-            # Для гладких зон используем интерполяцию
             self.im.set_array(current_data)
         else:
-            # Для пиксельного отображения
             self.im.set_data(current_data)
 
-        # Обновляем линию MPC
         if hasattr(self, 'mpc_line'):
             self.mpc_line.remove()
         self.mpc_line = self.ax.contour(
@@ -78,24 +86,24 @@ class MPCPlot:
             linestyles='dashed',
             extent=[0, self.x_size, 0, self.y_size])
 
-        self.ax.set_title(f'Карта загрязнений (шаг {it + 1}/{len(self.c_list)})\nПДК = {self.mpc}')
-        return self.im,
+        title = f'Карта загрязнений (шаг {it + 1}/{self.total_frames})\nПДК = {self.mpc}'
+        self.ax.set_title(title)
 
-    def draw(self):
-        self.ax.clear()
+        if self.progress_bar and self.output_file is not None:
+            progress = int((it + 1) / self.total_frames * 100)
+            self.progress_bar.setValue(progress)
 
-        # Настройка осей
+        return [self.im]
+
+    def draw_or_save(self):
         self._setup_axes()
 
-        # Создаем нормализацию и цветовую карту
         scaled_levels = self._get_scaled_levels()
         norm = BoundaryNorm(scaled_levels, len(self.zones['colors']))
-        cmap = colors.ListedColormap(self.zones['colors'])
+        cmap = ListedColormap(self.zones['colors'])
 
-        # Выбираем метод интерполяции в зависимости от флага zoning
         interpolation = 'bilinear' if self.zoning else 'nearest'
 
-        # Отображаем данные
         self.im = self.ax.imshow(
             self.c_list[0],
             extent=[0, self.x_size, 0, self.y_size],
@@ -104,8 +112,7 @@ class MPCPlot:
             norm=norm,
             interpolation=interpolation)
 
-        # Добавляем цветовую шкалу
-        if self.cbar:
+        if hasattr(self, 'cbar') and self.cbar:
             self.cbar.remove()
 
         self.cbar = self.fig.colorbar(
@@ -115,12 +122,11 @@ class MPCPlot:
             spacing='proportional',
             label=f'Концентрация (ПДК = {self.mpc})')
 
-        # Настраиваем метки цветовой шкалы
-        tick_positions = [(scaled_levels[i] + scaled_levels[i + 1]) / 2 for i in range(len(scaled_levels) - 1)]
+        tick_positions = [(scaled_levels[i] + scaled_levels[i + 1]) / 2
+                          for i in range(len(scaled_levels) - 1)]
         self.cbar.set_ticks(tick_positions)
         self.cbar.set_ticklabels(self.zones['labels'])
 
-        # Добавляем линию MPC для первого кадра
         self.mpc_line = self.ax.contour(
             self.c_list[0],
             levels=[self.mpc],
@@ -129,55 +135,129 @@ class MPCPlot:
             linestyles='dashed',
             extent=[0, self.x_size, 0, self.y_size])
 
-        self.ax.set_title(f'Карта загрязнений (шаг 1/{len(self.c_list)})\nПДК = {self.mpc}')
+        self.ax.set_title(f'Карта загрязнений\nПДК = {self.mpc}')
 
-        # Создаем анимацию
-        self.ani = animation.FuncAnimation(
+        # Создание анимации
+        self.ani = FuncAnimation(
             self.fig,
             self.update_frame,
-            frames=len(self.c_list),
+            frames=self.total_frames,
             interval=self.anim_int,
-            blit=False,
-            repeat=self.repeat,
-            cache_frame_data=False)
+            blit=True,
+            repeat=self.repeat)
 
-        plt.tight_layout()
-        plt.draw()
-        plt.show(block=False)
-        self.fig._ani = self.ani
+        if self.output_file is not None:
+            self._save_animation()
+        else:
+            plt.tight_layout()
+            plt.draw()
+            plt.show(block=False)
+            self.fig._ani = self.ani
+
+    def _save_animation(self):
+        try:
+            if self.output_file.lower().endswith('.gif'):
+                self._save_gif()
+            elif self.output_file.lower().endswith('.html'):
+                self._save_html()
+            else:
+                raise ValueError("Unsupported file format. Please use .gif or .html")
+
+            if self.progress_bar:
+                self.progress_bar.setValue(100)
+
+        except Exception as e:
+            self.show_error(f"Ошибка при сохранении: {str(e)}")
+        finally:
+            plt.close(self.fig)
+
+    def _save_gif(self):
+        writer = PillowWriter(fps=1000 / self.anim_int)
+
+        if self.progress_bar:
+            writer.frame_count = 0
+            original_grab_frame = writer.grab_frame
+
+            def grab_frame_with_progress(**kwargs):
+                result = original_grab_frame(**kwargs)
+                writer.frame_count += 1
+                progress = int(writer.frame_count / self.total_frames * 100)
+                self.progress_bar.setValue(progress)
+                return result
+
+            writer.grab_frame = grab_frame_with_progress
+
+        self.ani.save(self.output_file, writer=writer, dpi=100)
+
+    def _save_html(self):
+        html = self.ani.to_jshtml()
+        with open(self.output_file, 'w') as f:
+            f.write(html)
+
+    def show_error(self, message):
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Critical)
+        msg.setText("Ошибка")
+        msg.setInformativeText(message)
+        msg.setWindowTitle("Ошибка")
+        msg.exec_()
+
+    def show_info(self, message):
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Information)
+        msg.setText("Успех")
+        msg.setInformativeText(message)
+        msg.setWindowTitle("Информация")
+        msg.exec_()
 
 
-class DefaultPlot:
-    def __init__(self, anim_int, repeat, x_size, y_size, update_conc=False, zoning=False):
-        plt.switch_backend('Qt5Agg')
+class DefaultAnimation:
+    def __init__(self, anim_int, repeat, x_size, y_size, output_file=None,
+                 progress_bar=None, zoning=False, update_conc=False):
+        if output_file is not None:
+            plt.switch_backend('Agg')
+        else:
+            plt.switch_backend('Qt5Agg')
+
         plt.close('all')
 
-        self.fig = plt.figure()
-        self.ax = self.fig.add_subplot(111)
+        self.fig, self.ax = plt.subplots()
+        if output_file is not None:
+            self.canvas = FigureCanvasAgg(self.fig)
 
-        self.anim_int = anim_int
-        self.repeat = repeat
         self.x_size = x_size
         self.y_size = y_size
+        self.anim_int = anim_int
+        self.repeat = repeat
+        self.output_file = output_file
+        self.progress_bar = progress_bar
+        self.zoning = zoning
         self.update_conc = update_conc
-        self.zoning = zoning  # Store the zoning parameter
 
-        data = np.load("model.npz")
-        self.c_list = data['res']
+        self.c_list = np.load("model.npz")['res']
+        self.total_frames = len(self.c_list)
+        self.current_vmax = np.max(self.c_list) if not update_conc else np.max(self.c_list[0])
         self.ani = None
         self.im = None
 
+        if progress_bar and output_file is not None:
+            progress_bar.setRange(0, 100)
+            progress_bar.setValue(0)
+
     def update_frame(self, it):
         if self.update_conc:
-            self.im.set_clim(vmin=0, vmax=np.max(self.c_list[it]))
-        self.im.set_data(self.c_list[it])
-        return self.im,
+            self.current_vmax = np.max(self.c_list[it])
+            self.im.set_clim(vmin=0, vmax=self.current_vmax)
 
-    def draw(self):
-        self.ax.clear()
-        vmax = np.max(self.c_list[0]) if self.update_conc else np.max(self.c_list)
+        self.im.set_array(self.c_list[it])
 
-        # Set interpolation based on zoning parameter
+        if self.progress_bar and self.output_file is not None:
+            progress = int((it + 1) / self.total_frames * 100)
+            self.progress_bar.setValue(progress)
+
+        return [self.im]
+
+    def draw_or_save(self):
         interpolation = 'bilinear' if self.zoning else 'nearest'
 
         self.im = self.ax.imshow(
@@ -186,21 +266,60 @@ class DefaultPlot:
             origin='lower',
             cmap='hot',
             vmin=0,
-            vmax=vmax,
-            interpolation=interpolation)  # Add interpolation parameter
+            vmax=self.current_vmax,
+            interpolation=interpolation)
 
         self.fig.colorbar(self.im, ax=self.ax, label='Концентрация')
 
-        self.ani = animation.FuncAnimation(
+        self.ani = FuncAnimation(
             self.fig,
             self.update_frame,
-            frames=len(self.c_list),
+            frames=self.total_frames,
             interval=self.anim_int,
-            blit=False,
-            repeat=False,
-            cache_frame_data=False)
+            blit=True,
+            repeat=self.repeat
+        )
 
-        plt.draw()
-        plt.show(block=False)
+        if self.output_file is not None:
+            self._save_animation()
+        else:
+            plt.draw()
+            plt.show(block=False)
+            self.fig._ani = self.ani
 
-        self.fig._ani = self.ani  # Защита от сборщика мусора
+    def _save_animation(self):
+        if self.output_file.lower().endswith('.gif'):
+            self._save_gif()
+        elif self.output_file.lower().endswith('.html'):
+            self._save_html()
+        else:
+            raise ValueError("Unsupported file format. Please use .gif or .html")
+        plt.close(self.fig)
+
+    def _save_gif(self):
+        writer = PillowWriter(fps=1000 / self.anim_int)
+        if self.progress_bar:
+            writer.frame_count = 0
+            original_grab_frame = writer.grab_frame
+
+            def grab_frame_with_progress(**kwargs):
+                result = original_grab_frame(**kwargs)
+                writer.frame_count += 1
+                progress = int(writer.frame_count / self.total_frames * 100)
+                self.progress_bar.setValue(progress)
+                return result
+
+            writer.grab_frame = grab_frame_with_progress
+
+        self.ani.save(self.output_file, writer=writer, dpi=100)
+
+    def _save_html(self):
+        html = self.ani.to_jshtml()
+        with open(self.output_file, 'w') as f:
+            f.write(html)
+
+    def show_error(self, message):
+        QMessageBox.critical(None, "Ошибка", message)
+
+    def show_info(self, message):
+        QMessageBox.information(None, "Успех", message)

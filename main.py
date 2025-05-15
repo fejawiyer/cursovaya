@@ -7,8 +7,9 @@ from PyQt5.QtWidgets import (QWidget, QLabel, QApplication, QMenuBar, QDesktopWi
                              QVBoxLayout, QLineEdit, QPushButton, QFileDialog, QProgressBar, QComboBox, QCheckBox)
 from utils.Conditions import NewConditions
 from utils.Model import Model
-from utils.Render_tools import SaveMPCAnimation, SaveDefaultAnimation
-from utils.Plotting import MPCPlot, DefaultPlot
+from utils.Plotting import MPCAnimation, DefaultAnimation
+from utils.PDK_Table import SubstancesDialog
+from utils.Logs import LogViewerDialog
 from tkinter.messagebox import showerror
 
 
@@ -36,17 +37,31 @@ class App(QWidget):
         self.c_start = self.menuBar.addMenu('&Начальные условия')
         createNewCStart = QAction("Новые...", self)
 
+        self.pdk_table = self.menuBar.addMenu('&ПДК')
+        checkPDK = QAction("Таблица", self)
+
+        self.logsMenu = self.menuBar.addMenu('&Логи')
+        checkLogs = QAction("Смотреть", self)
+
+        checkPDK.triggered.connect(self.pdk_table_dialog)
+
         createNewFileAction.triggered.connect(self.newFileDialog)
         openFileAction.triggered.connect(self.openFileDialog)
         saveFileAction.triggered.connect(self.saveFile)
 
         createNewCStart.triggered.connect(self.createNewConditions)
 
+        checkLogs.triggered.connect(self.check_logs)
+
         self.projectMenu.addAction(createNewFileAction)
         self.projectMenu.addAction(openFileAction)
         self.projectMenu.addAction(saveFileAction)
 
         self.c_start.addAction(createNewCStart)
+
+        self.pdk_table.addAction(checkPDK)
+
+        self.logsMenu.addAction(checkLogs)
 
         self.main_layout = QVBoxLayout()
         self.main_layout.setMenuBar(self.menuBar)
@@ -192,7 +207,7 @@ class App(QWidget):
 
         self.x_size = self.y_size = self.x_step = self.y_step = self.Dx = self.Dy = self.u = self.v = self.t \
             = self.t_step = self.anim_int = self.freq = self.x = self.y = self.c = self.is_const_generation \
-            = self.repeat_freq = self.condit_start = self.update_conc = None
+            = self.repeat_freq = self.condit_start = self.update_conc = self.sources = None
 
         self.npz_exists = os.path.isfile("model.npz")
 
@@ -200,6 +215,20 @@ class App(QWidget):
 
         self.setLayout(self.main_layout)
         self.show()
+
+    def check_logs(self):
+        try:
+            logsDialog = LogViewerDialog(self)
+            logsDialog.exec_()
+        except Exception as e:
+            print(f"{e}")
+
+    def pdk_table_dialog(self):
+        dialog = SubstancesDialog("substances.json", parent=self)
+        if dialog.exec_() == QDialog.Accepted:
+            logging.info("Created substances.json")
+        else:
+            logging.error("Error while created substances.json")
 
     def mpc_check(self):
         if self.use_mpc_check.isChecked():
@@ -232,9 +261,7 @@ class App(QWidget):
                 self.substances_data = data['substances']
                 self.substance_names = [sub['name'] for sub in self.substances_data]
         except FileNotFoundError:
-            print("Файл substances.json не найден")
-            self.substances_data = []
-            self.substance_names = ["Ртуть"]
+            logging.error("File substances.json is not found")
 
     def get_params(self):
         try:
@@ -253,18 +280,19 @@ class App(QWidget):
             c_start_file = str(self.initial_conditions_file.text())
             with open(c_start_file.replace("/", "\\"), "r") as config:
                 config_data = json.load(config)
-                if "x" in config_data:
-                    self.x = float(config_data["x"])
-                if "y" in config_data:
-                    self.y = float(config_data["y"])
-                if "c" in config_data:
-                    self.c = float(config_data["c"])
-                if "is_const_generation":
-                    self.is_const_generation = bool(config_data["is_const_generation"])
-                if "repeat_freq":
-                    self.repeat_freq = int(config_data["repeat_freq"])
+                if "sources" in config_data:
+                    self.sources = config_data["sources"]
+                else:
+                    logging.error("Invalid config format: must contain either 'x', 'y', 'c' or 'sources'")
+
             self.condit_start = np.zeros((int(self.x_size), int(self.y_size)))
-            self.condit_start[int(self.x)][int(self.y)] = self.c
+            for source in self.sources:
+                x = int(source["x"])
+                y = int(source["y"])
+                c = float(source["concentration"])
+                self.repeat_freq = int(source["frequency"])
+                self.is_const_generation = True if self.repeat_freq != 0 else False
+                self.condit_start[y][x] = c
             self.update_conc = self.update_c_radio.isChecked()
         except Exception as e:
             logging.error(f"{e}")
@@ -316,17 +344,9 @@ class App(QWidget):
         dialog = NewConditions(self)
         if dialog.exec_() == QDialog.Accepted:
             try:
-                parameters = dialog.getProperties()
-                config_data = {
-                    "is_const_source": bool(parameters[1]),
-                    "x": str(parameters[2]),
-                    "y": str(parameters[3]),
-                    "c": str(parameters[4]),
-                    "is_const_generation": bool(parameters[5]),
-                    "repeat_freq": str(parameters[6])
-                }
-                with open(str(parameters[0]).replace("/", "\\"), "w") as config:
-                    json.dump(config_data, config, indent=4)
+                parameters = dialog.get_properties()
+                with open('parameters.json', 'w', encoding='utf-8') as f:
+                    json.dump(parameters, f, ensure_ascii=False, indent=4)
             except Exception as e:
                 logging.error(f"{e}")
 
@@ -389,6 +409,7 @@ class App(QWidget):
 
             except Exception as e:
                 showerror("Error", f"Failed to load file:\n{str(e)}")
+                logging.error(f"Failed to load file:\n{str(e)}")
 
     def iterate(self):
         self.get_params()
@@ -410,13 +431,13 @@ class App(QWidget):
         try:
             zoning = True if self.interpolation_method.currentText() == "Билинейная интерполяция" else False
             if self.mpc_use:
-                plot = MPCPlot(self.anim_int, self.is_const_generation, self.x_size, self.y_size,
+                plot = MPCAnimation(self.anim_int, self.is_const_generation, self.x_size, self.y_size,
                                self.get_current_pdk(), zoning=zoning)
-                plot.draw()
+                plot.draw_or_save()
             else:
-                plot = DefaultPlot(self.anim_int, self.is_const_generation, self.x_size, self.y_size,
+                plot = DefaultAnimation(self.anim_int, self.is_const_generation, self.x_size, self.y_size,
                                    update_conc=self.update_conc, zoning=zoning)
-                plot.draw()
+                plot.draw_or_save()
         except Exception as e:
             logging.error(f"{e}")
 
@@ -426,15 +447,15 @@ class App(QWidget):
         try:
             zoning = True if self.interpolation_method.currentText() == "Билинейная интерполяция" else False
             if self.mpc_use:
-                saver = SaveMPCAnimation(anim_int=self.anim_int, repeat=self.is_const_generation, x_size=self.x_size,
+                saver = MPCAnimation(anim_int=self.anim_int, repeat=self.is_const_generation, x_size=self.x_size,
                                          y_size=self.y_size, mpc=self.get_current_pdk(), output_file=output,
                                          zoning=zoning, progress_bar=self.progress_bar)
-                saver.save()
+                saver.draw_or_save()
             else:
-                saver = SaveDefaultAnimation(anim_int=self.anim_int, repeat=self.is_const_generation,
+                saver = DefaultAnimation(anim_int=self.anim_int, repeat=self.is_const_generation,
                                              x_size=self.x_size, y_size=self.y_size, output_file=output,
                                              zoning=zoning, progress_bar=self.progress_bar)
-                saver.save()
+                saver.draw_or_save()
         except Exception as e:
             logging.error(f"{e}")
 
