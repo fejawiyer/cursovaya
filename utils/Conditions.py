@@ -222,7 +222,7 @@ class NewConditions(QDialog):
             x, y = source['pos']
             # Переводим координаты обратно в метры
             x_meters = x / self.map_view.resolution
-            y_meters = y / self.map_view.resolution
+            y_meters = (self.map_view.pixels-y) / self.map_view.resolution
             sources.append({
                 'x': x_meters,
                 'y': y_meters,

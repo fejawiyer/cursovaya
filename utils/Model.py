@@ -13,7 +13,7 @@ class Model:
                  dx=1, dy=1, dt=0.1,
                  u=0, v=0,
                  slices_freq=1,
-                 anim_interval=10, scale=5, repeat_freq=-1,
+                 repeat_freq=-1,
                  repeat_start_conditions=False, check_stable=True, check_cfl=True,
                  conditions="Dirihle"):
         self.X = np.linspace(0, int(x_size), int(x_steps))
@@ -30,14 +30,13 @@ class Model:
         self.dt = dt
         self.c = c_start
         self.c_start = c_start
-        self.anim_interval = anim_interval
         self.repeat_start_conditions = repeat_start_conditions
         self.check_cfl = check_cfl
         self.cfl = None
         self.repeat_freq = repeat_freq
         logger.info("Modelling start")
         if check_cfl:
-            self.cfl = dt * np.max(u) / dx + dt * np.max(v) / dy + 2 * Dx * dt / dx ** 2 + 2 * Dy * dt / dy ** 2
+            self.cfl = dt * np.max(u) / dx + dt * np.max(v) / dy + 2 * Dx * dt / dx ** 2 + 2 *Dy * dt / dy ** 2
             logger.info(f"CFL:{self.cfl}")
             if self.cfl > 1:
                 for i in range(50):
@@ -69,11 +68,8 @@ class Model:
         self.dynamic_wind_u = False
         self.dynamic_wind_v = False
         self.conditions = conditions
-        self.scale = scale
         self.check_stable = check_stable
         self.c_list = []
-        self.wind_list_u = []
-        self.wind_list_v = []
         self.Q = None
         self.im = None
         self.crit_t_u = None
@@ -121,8 +117,6 @@ class Model:
                 raise Exception("Решение расходится")
             if int(t % self.slices_freq) == 0:
                 self.c_list.append(self.c.copy())
-                self.wind_list_u.append(self.u)
-                self.wind_list_v.append(self.v)
 
         end_time = time.time()
         logger.info(f"Time spend {end_time - start_time:.5f} seconds.")

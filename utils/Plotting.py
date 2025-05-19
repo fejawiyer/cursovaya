@@ -1,9 +1,13 @@
+import multiprocessing
+from concurrent.futures import ThreadPoolExecutor
+
 import numpy as np
 from PyQt5.QtWidgets import QMessageBox
 from matplotlib import pyplot as plt
 from matplotlib.animation import PillowWriter, FuncAnimation
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.colors import BoundaryNorm, ListedColormap
+from matplotlib.figure import Figure
 from matplotlib.ticker import FixedLocator
 
 
@@ -11,6 +15,7 @@ class MPCAnimation:
     def __init__(self, anim_int, repeat, x_size, y_size, mpc,
                  output_file=None, progress_bar=None, zoning=False):
         backend = 'Agg' if output_file is not None else 'Qt5Agg'
+        print(backend)
         plt.switch_backend(backend)
         plt.close('all')
 
@@ -36,6 +41,7 @@ class MPCAnimation:
         self.im = None
         self.cbar = None
         self.mpc_line = None
+        self.title = None
 
         if progress_bar and output_file is not None:
             progress_bar.setRange(0, 100)
@@ -86,14 +92,14 @@ class MPCAnimation:
             linestyles='dashed',
             extent=[0, self.x_size, 0, self.y_size])
 
-        title = f'Карта загрязнений (шаг {it + 1}/{self.total_frames})\nПДК = {self.mpc}'
-        self.ax.set_title(title)
+        self.title.set_text(f'Карта загрязнений (шаг {it + 1}/{self.total_frames})\nПДК = {self.mpc}')
 
         if self.progress_bar and self.output_file is not None:
             progress = int((it + 1) / self.total_frames * 100)
             self.progress_bar.setValue(progress)
 
-        return [self.im]
+        return [self.im, self.mpc_line, self.title]
+
 
     def draw_or_save(self):
         self._setup_axes()
@@ -111,6 +117,15 @@ class MPCAnimation:
             cmap=cmap,
             norm=norm,
             interpolation=interpolation)
+
+        self.title = self.ax.text(
+            0.5, 1.05,  # Позиция (x=0.5 - центр, y=1.05 - чуть выше осей)
+            f'Карта загрязнений\nПДК = {self.mpc}',
+            transform=self.ax.transAxes,
+            ha='center',
+            va='bottom',
+            bbox={'facecolor': 'white', 'alpha': 0.7, 'pad': 5}
+        )
 
         if hasattr(self, 'cbar') and self.cbar:
             self.cbar.remove()
@@ -135,15 +150,13 @@ class MPCAnimation:
             linestyles='dashed',
             extent=[0, self.x_size, 0, self.y_size])
 
-        self.ax.set_title(f'Карта загрязнений\nПДК = {self.mpc}')
-
         # Создание анимации
         self.ani = FuncAnimation(
             self.fig,
             self.update_frame,
             frames=self.total_frames,
             interval=self.anim_int,
-            blit=True,
+            blit=False,
             repeat=self.repeat)
 
         if self.output_file is not None:
@@ -172,23 +185,129 @@ class MPCAnimation:
             plt.close(self.fig)
 
     def _save_gif(self):
-        writer = PillowWriter(fps=1000 / self.anim_int)
+        # Determine number of workers (leave one core free for main thread)
+        num_workers = max(1, multiprocessing.cpu_count() - 1)
 
-        if self.progress_bar:
-            writer.frame_count = 0
-            original_grab_frame = writer.grab_frame
+        # Create frame rendering function that doesn't leak figures
+        def render_frame(frame_num):
+            # Create figure without using pyplot to avoid warnings
+            fig = Figure(figsize=(10, 8))
+            canvas = FigureCanvasAgg(fig)
+            ax = fig.add_subplot(111)
 
-            def grab_frame_with_progress(**kwargs):
-                result = original_grab_frame(**kwargs)
-                writer.frame_count += 1
-                progress = int(writer.frame_count / self.total_frames * 100)
-                self.progress_bar.setValue(progress)
-                return result
+            # Get current frame data
+            current_data = self.c_list[frame_num]
 
-            writer.grab_frame = grab_frame_with_progress
+            # Recreate the visualization
+            scaled_levels = self._get_scaled_levels()
+            norm = BoundaryNorm(scaled_levels, len(self.zones['colors']))
+            cmap = ListedColormap(self.zones['colors'])
 
-        self.ani.save(self.output_file, writer=writer, dpi=100)
+            interpolation = 'bilinear' if self.zoning else 'nearest'
+            im = ax.imshow(
+                current_data,
+                extent=[0, self.x_size, 0, self.y_size],
+                origin='lower',
+                cmap=cmap,
+                norm=norm,
+                interpolation=interpolation)
 
+            # Add contours
+            mpc_line = ax.contour(
+                current_data,
+                levels=[self.mpc],
+                colors=['white'],
+                linewidths=2,
+                linestyles='dashed',
+                extent=[0, self.x_size, 0, self.y_size])
+
+            # Add title
+            ax.set_title(f'Карта загрязнений (шаг {frame_num + 1}/{self.total_frames})\nПДК = {self.mpc}')
+
+            # Draw the figure
+            canvas.draw()
+
+            # Get the image data
+            buf = canvas.buffer_rgba()
+            width, height = canvas.get_width_height()
+            img_array = np.frombuffer(buf, dtype=np.uint8).reshape(height, width, 4)
+
+            # Explicit cleanup
+            fig.clear()
+            plt.close(fig)
+            del fig, canvas, ax
+
+            return img_array
+
+        try:
+            # Process frames in batches to avoid memory issues
+            batch_size = min(20, self.total_frames)
+            frames = []
+
+            for i in range(0, self.total_frames, batch_size):
+                with ThreadPoolExecutor(max_workers=num_workers) as executor:
+                    frames.extend(executor.map(render_frame, range(i, min(i + batch_size, self.total_frames))))
+
+                if self.progress_bar:
+                    progress = int((i + batch_size) / self.total_frames * 100)
+                    self.progress_bar.setValue(min(progress, 100))
+
+            # Save the frames
+            writer = PillowWriter(fps=1000 / self.anim_int)
+            with writer.saving(self.fig, self.output_file, dpi=100):
+                for i, frame in enumerate(frames):
+                    writer.grab_frame()
+                    if self.progress_bar:
+                        progress = int((i + 1) / self.total_frames * 100)
+                        self.progress_bar.setValue(progress)
+
+        except Exception as e:
+            self.show_error(f"Ошибка при сохранении: {str(e)}")
+        finally:
+            plt.close('all')
+
+    def _render_frame(self, frame_num):
+        """Render a single frame and return the image data"""
+        # Create a new figure and canvas for this frame
+        fig, ax = plt.subplots(figsize=(10, 8))
+        canvas = FigureCanvasAgg(fig)
+
+        # Copy the content from our main figure
+        self.update_frame(frame_num)
+
+        # Draw the new figure with the same content
+        ax.clear()
+        ax.imshow(self.im.get_array(),
+                  extent=[0, self.x_size, 0, self.y_size],
+                  origin='lower',
+                  cmap=self.im.get_cmap(),
+                  norm=self.im.norm,
+                  interpolation=self.im.get_interpolation())
+
+        # Add contours if they exist
+        if hasattr(self, 'mpc_line'):
+            ax.contour(self.im.get_array(),
+                       levels=[self.mpc],
+                       colors=['white'],
+                       linewidths=2,
+                       linestyles='dashed',
+                       extent=[0, self.x_size, 0, self.y_size])
+
+        # Add title
+        ax.set_title(f'Карта загрязнений (шаг {frame_num + 1}/{self.total_frames})\nПДК = {self.mpc}')
+
+        # Draw the figure
+        fig.canvas.draw()
+
+        # Get the image data as numpy array
+        buf = fig.canvas.buffer_rgba()
+        width, height = fig.canvas.get_width_height()
+        img_array = np.frombuffer(buf, dtype=np.uint8).reshape(height, width, 4)
+
+        # Close the temporary figure to free memory
+        plt.close(fig)
+
+        return img_array
     def _save_html(self):
         html = self.ani.to_jshtml()
         with open(self.output_file, 'w') as f:

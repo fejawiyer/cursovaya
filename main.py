@@ -103,8 +103,6 @@ class App(QWidget):
         self.save_label = QLabel("Введите частоту сохранения")
         self.save_input = QLineEdit()
 
-        self.initial_conditions_file = QPushButton("Выберите файл с начальными условиями")
-
         self.iterate_button = QPushButton("Моделирование")
 
         self.ok_button = QPushButton("Просмотр")
@@ -176,20 +174,19 @@ class App(QWidget):
         self.grid_layout.addWidget(self.save_label, 5, 6)
         self.grid_layout.addWidget(self.save_input, 5, 7)
 
-        self.grid_layout.addWidget(self.initial_conditions_file, 6, 2)
         self.grid_layout.addWidget(self.interpolation_method, 6, 4)
+        self.grid_layout.addWidget(self.iterate_button, 6, 2)
 
-        self.grid_layout.addWidget(self.iterate_button, 7, 2)
         self.grid_layout.addWidget(self.use_mpc, 7, 4)
         self.grid_layout.addWidget(self.use_mpc_check, 7, 5)
+        self.grid_layout.addWidget(self.ok_button, 7, 2)
 
-        self.grid_layout.addWidget(self.ok_button, 8, 2)
         self.grid_layout.addWidget(self.substance_label, 8, 4)
         self.grid_layout.addWidget(self.select_substance, 8, 5)
         self.grid_layout.addWidget(self.update_c_label, 8, 4)
         self.grid_layout.addWidget(self.update_c_radio, 8, 5)
+        self.grid_layout.addWidget(self.save_list, 8, 2)
 
-        self.grid_layout.addWidget(self.save_list, 9, 2)
         self.grid_layout.addWidget(self.work_zone, 9, 4)
         self.grid_layout.addWidget(self.work_zone_check, 9, 5)
 
@@ -200,7 +197,6 @@ class App(QWidget):
 
         self.grid_layout.addWidget(self.progress_bar, 11, 2)
 
-        self.initial_conditions_file.clicked.connect(self.select_conditions)
         self.iterate_button.clicked.connect(self.iterate)
         self.ok_button.clicked.connect(self.show_it)
         self.save_button.clicked.connect(self.save_it)
@@ -277,7 +273,7 @@ class App(QWidget):
             self.t_step = float(self.t_step_input.text())
             self.anim_int = int(self.int_input.text())
             self.freq = int(self.save_input.text())
-            c_start_file = str(self.initial_conditions_file.text())
+            c_start_file = "parameters.json"
             with open(c_start_file.replace("/", "\\"), "r") as config:
                 config_data = json.load(config)
                 if "sources" in config_data:
@@ -296,16 +292,6 @@ class App(QWidget):
             self.update_conc = self.update_c_radio.isChecked()
         except Exception as e:
             logging.error(f"{e}")
-
-    def select_conditions(self):
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Выберите файл начальных условий",
-            "",  # Начальная директория
-            "JSON Files (*.json)"  # Фильтры файлов
-        )
-        if file_path:
-            self.initial_conditions_file.setText(file_path)
 
     def load_stylesheet(self, filepath):
         try:
@@ -364,7 +350,7 @@ class App(QWidget):
             "wind_u": self.wind_u_input.text(),
             "dy": self.dy_input.text(),
             "save_name": self.save_input.text(),
-            "initial_conditions": self.initial_conditions_file.text(),
+            "initial_conditions": "parameters.json",
             "update_conc": self.update_c_radio.isChecked(),
         }
 
@@ -401,7 +387,6 @@ class App(QWidget):
                 self.wind_u_input.setText(str(data.get("wind_u", "")))
                 self.dy_input.setText(str(data.get("dy", "")))
                 self.save_input.setText(str(data.get("save_name", "")))
-                self.initial_conditions_file.setText(str(data.get("initial_conditions", "")))
                 self.update_c_radio.setChecked(bool(data.get("update_conc")))
 
                 if self.grid_layout not in self.main_layout.children():
@@ -416,7 +401,7 @@ class App(QWidget):
         try:
             model = Model(self.condit_start, self.x_size, self.y_size, int(self.x_size), int(self.y_size), int(self.t),
                           self.Dx, self.Dy, self.x_step, self.y_step, self.t_step, int(self.u), int(self.v), self.freq,
-                          self.anim_int, repeat_freq=self.repeat_freq, repeat_start_conditions=self.is_const_generation)
+                          repeat_freq=self.repeat_freq, repeat_start_conditions=self.is_const_generation)
             model.iterate()
             res = model.c_list
             np.savez("model.npz", res=res)
@@ -432,11 +417,11 @@ class App(QWidget):
             zoning = True if self.interpolation_method.currentText() == "Билинейная интерполяция" else False
             if self.mpc_use:
                 plot = MPCAnimation(self.anim_int, self.is_const_generation, self.x_size, self.y_size,
-                               self.get_current_pdk(), zoning=zoning)
+                                    self.get_current_pdk(), zoning=zoning)
                 plot.draw_or_save()
             else:
                 plot = DefaultAnimation(self.anim_int, self.is_const_generation, self.x_size, self.y_size,
-                                   update_conc=self.update_conc, zoning=zoning)
+                                        update_conc=self.update_conc, zoning=zoning)
                 plot.draw_or_save()
         except Exception as e:
             logging.error(f"{e}")
@@ -448,13 +433,13 @@ class App(QWidget):
             zoning = True if self.interpolation_method.currentText() == "Билинейная интерполяция" else False
             if self.mpc_use:
                 saver = MPCAnimation(anim_int=self.anim_int, repeat=self.is_const_generation, x_size=self.x_size,
-                                         y_size=self.y_size, mpc=self.get_current_pdk(), output_file=output,
-                                         zoning=zoning, progress_bar=self.progress_bar)
+                                     y_size=self.y_size, mpc=self.get_current_pdk(), output_file=output,
+                                     zoning=zoning, progress_bar=self.progress_bar)
                 saver.draw_or_save()
             else:
                 saver = DefaultAnimation(anim_int=self.anim_int, repeat=self.is_const_generation,
-                                             x_size=self.x_size, y_size=self.y_size, output_file=output,
-                                             zoning=zoning, progress_bar=self.progress_bar)
+                                         x_size=self.x_size, y_size=self.y_size, output_file=output,
+                                         zoning=zoning, progress_bar=self.progress_bar)
                 saver.draw_or_save()
         except Exception as e:
             logging.error(f"{e}")
