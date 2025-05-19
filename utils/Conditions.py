@@ -81,14 +81,16 @@ class MapView(QGraphicsView):
             # Горизонтальная шкала (снизу)
             text = self.scene.addText(f"{meters}m")
             text.setFont(font)
-            text.setPos(i + 5, 0)
-            # Вертикальная шкала (слева)
-            text = self.scene.addText(f"{meters}m")
-            text.setFont(font)
-            text.setPos(0, i + 5)
-
-            # Переворачиваем текст вертикальной шкалы
+            text.setPos(i + 5, 15)
             text.setTransform(QtGui.QTransform().scale(1, -1))
+            # Вертикальная шкала (слева)
+            if i != 0:
+                text = self.scene.addText(f"{meters}m")
+                text.setFont(font)
+                text.setPos(0, i + 5)
+                # Переворачиваем текст вертикальной шкалы
+
+                text.setTransform(QtGui.QTransform().scale(1, -1))
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:

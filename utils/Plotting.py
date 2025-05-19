@@ -112,7 +112,7 @@ class MPCAnimation:
 
         self.im = self.ax.imshow(
             self.c_list[0],
-            extent=[0, self.y_size, 0, self.x_size],
+            extent=[0, self.x_size, 0, self.y_size],
             origin='lower',
             cmap=cmap,
             norm=norm,
