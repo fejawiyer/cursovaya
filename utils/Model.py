@@ -35,6 +35,7 @@ class Model:
         self.cfl = None
         self.repeat_freq = repeat_freq
         logger.info("Modelling start")
+
         if check_cfl:
             self.cfl = dt * np.max(u) / dx + dt * np.max(v) / dy + 2 * Dx * dt / dx ** 2 + 2 *Dy * dt / dy ** 2
             logger.info(f"CFL:{self.cfl}")
@@ -65,6 +66,8 @@ class Model:
             self.v = v + 0 * self.Y
         else:
             self.v = v
+        logger.info(f"Wind X={self.u}")
+        logger.info(f"Wind Y={self.v}")
         self.dynamic_wind_u = False
         self.dynamic_wind_v = False
         self.conditions = conditions
@@ -90,8 +93,8 @@ class Model:
             c_new[1:-1, 1:-1] = self.Dx * (self.c[:-2, 1:-1] - 2 * self.c[1:-1, 1:-1] + self.c[2:, 1:-1]) / self.dx ** 2
             c_new[1:-1, 1:-1] += self.Dy * (
                     self.c[1:-1, :-2] - 2 * self.c[1:-1, 1:-1] + self.c[1:-1, 2:]) / self.dy ** 2
-            c_new[1:-1, 1:-1] -= ((self.c[1:-1, 1:-1] - self.c[:-2, 1:-1]) * self.u[1:-1, 1:-1] / (self.dx))
-            c_new[1:-1, 1:-1] -= ((self.c[1:-1, 1:-1] - self.c[1:-1, :-2]) * self.v[1:-1, 1:-1] / (self.dy))
+            c_new[1:-1, 1:-1] -= ((self.c[1:-1, 1:-1] - self.c[:-2, 1:-1]) * self.u[1:-1, 1:-1] / self.dx)
+            c_new[1:-1, 1:-1] -= ((self.c[1:-1, 1:-1] - self.c[1:-1, :-2]) * self.v[1:-1, 1:-1] / self.dy)
             c_new[1:-1, 1:-1] *= self.dt
             c_new[1:-1, 1:-1] += self.c[1:-1, 1:-1]
 

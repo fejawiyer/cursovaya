@@ -32,7 +32,7 @@ class MPCAnimation:
         self.progress_bar = progress_bar
         self.zoning = zoning
 
-        self.c_list = np.load("model.npz")['res']
+        self.c_list = np.load("model.npz")['res'].transpose(0, 2, 1)
         self.total_frames = len(self.c_list)
 
         self._setup_zones()
@@ -112,7 +112,7 @@ class MPCAnimation:
 
         self.im = self.ax.imshow(
             self.c_list[0],
-            extent=[0, self.x_size, 0, self.y_size],
+            extent=[0, self.y_size, 0, self.x_size],
             origin='lower',
             cmap=cmap,
             norm=norm,
@@ -353,7 +353,7 @@ class DefaultAnimation:
         self.zoning = zoning
         self.update_conc = update_conc
 
-        self.c_list = np.load("model.npz")['res']
+        self.c_list = np.load("model.npz")['res'].transpose(0, 2, 1)
         self.total_frames = len(self.c_list)
         self.current_vmax = np.max(self.c_list) if not update_conc else np.max(self.c_list[0])
         self.ani = None

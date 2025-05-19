@@ -109,7 +109,7 @@ class App(QWidget):
 
         self.save_button = QPushButton("Сохранить")
 
-        self.update_c_label = QLabel("Обновлять шкалы ветра и концентрации")
+        self.update_c_label = QLabel("Обновлять шкалу концентрации")
         self.update_c_radio = QCheckBox()
 
         self.use_mpc = QLabel("Использовать ПДК")
@@ -288,7 +288,7 @@ class App(QWidget):
                 c = float(source["concentration"])
                 self.repeat_freq = int(source["frequency"])
                 self.is_const_generation = True if self.repeat_freq != 0 else False
-                self.condit_start[y][x] = c
+                self.condit_start[x][y] = c
             self.update_conc = self.update_c_radio.isChecked()
         except Exception as e:
             logging.error(f"{e}")

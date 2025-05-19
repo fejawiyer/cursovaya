@@ -53,6 +53,10 @@ class MapView(QGraphicsView):
         self.scene.setSceneRect(0, 0, self.pixels, self.pixels)
         self.setFixedSize(self.pixels + 20, self.pixels + 20)
 
+        # Инвертируем вид по оси Y, чтобы нули были снизу
+        self.scale(1, -1)
+        self.translate(0, -self.pixels)
+
         # Рисуем сетку и шкалу
         self.draw_grid_and_scale()
 
@@ -74,19 +78,25 @@ class MapView(QGraphicsView):
         font.setPointSize(8)
         for i in range(0, self.pixels + 1, 10 * self.resolution):
             meters = i // self.resolution
-            # Горизонтальная шкала
+            # Горизонтальная шкала (снизу)
             text = self.scene.addText(f"{meters}m")
             text.setFont(font)
             text.setPos(i + 5, 0)
-            # Вертикальная шкала
+            # Вертикальная шкала (слева)
             text = self.scene.addText(f"{meters}m")
             text.setFont(font)
             text.setPos(0, i + 5)
+
+            # Переворачиваем текст вертикальной шкалы
+            text.setTransform(QtGui.QTransform().scale(1, -1))
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             pos = self.mapToScene(event.pos())
             x, y = pos.x(), pos.y()
+
+            # Переворачиваем координату Y
+            y = self.pixels - y
 
             # Проверяем, что клик внутри карты
             if 0 <= x <= self.pixels and 0 <= y <= self.pixels:
@@ -130,9 +140,9 @@ class MapView(QGraphicsView):
         if source['text_item']:
             self.scene.removeItem(source['text_item'])
 
-        # Создаем новый маркер
+        # Создаем новый маркер (учитываем инвертированную ось Y)
         radius = 6 if is_saved else 4  # Сохраненные источники немного больше
-        item = QGraphicsEllipseItem(x - radius, y - radius, radius * 2, radius * 2)
+        item = QGraphicsEllipseItem(x - radius, self.pixels - y - radius, radius * 2, radius * 2)
 
         if is_saved:
             item.setBrush(QBrush(QColor(0, 255, 0, 200)))  # Зеленый для сохраненных
@@ -148,8 +158,10 @@ class MapView(QGraphicsView):
         if is_saved and source['concentration'] > 0:
             text = QGraphicsSimpleTextItem(f"{source['concentration']:.1f}")
             text.setFont(QFont("Arial", 8))
-            text.setPos(x + radius + 2, y - radius)
+            text.setPos(x + radius + 2, self.pixels - y - radius)
             text.setBrush(QBrush(Qt.black))
+            # Переворачиваем текст
+            text.setTransform(QtGui.QTransform().scale(1, -1))
             self.scene.addItem(text)
             source['text_item'] = text
 
@@ -222,7 +234,7 @@ class NewConditions(QDialog):
             x, y = source['pos']
             # Переводим координаты обратно в метры
             x_meters = x / self.map_view.resolution
-            y_meters = (self.map_view.pixels-y) / self.map_view.resolution
+            y_meters = y / self.map_view.resolution
             sources.append({
                 'x': x_meters,
                 'y': y_meters,
