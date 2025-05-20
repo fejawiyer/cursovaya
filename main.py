@@ -254,8 +254,8 @@ class App(QWidget):
         try:
             with open('substances.json', 'r', encoding='utf-8') as file:
                 data = json.load(file)
-                self.substances_data = data['substances']
-                self.substance_names = [sub['name'] for sub in self.substances_data]
+                self.substances_data = sorted(data['substances'], key=lambda x: x['name'].lower())
+                self.substance_names = sorted([sub['name'] for sub in self.substances_data], key=lambda x: x.lower())
         except FileNotFoundError:
             logging.error("File substances.json is not found")
 
