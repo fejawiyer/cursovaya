@@ -19,10 +19,10 @@ class App(QWidget):
         super().__init__()
 
         try:
-            self.load_stylesheet("style.qss")
+            self.load_stylesheet("style_dark.qss")
         except FileNotFoundError:
-            showerror("Ошибка", "Файл style.qss не найден.")
-            logging.error("style.qss is not found")
+            showerror("Ошибка", "Файл style_dark.qss не найден.")
+            logging.error("style_dark.qss is not found")
 
         self.resize(1280, 720)
         self.center()
@@ -46,6 +46,14 @@ class App(QWidget):
 
         self.logsMenu = self.menuBar.addMenu('&Логи')
         checkLogs = QAction("Смотреть", self)
+
+        self.styleMenu = self.menuBar.addMenu('&Стили')
+        lightTheme = QAction("Светлая тема", self)
+        darkTheme = QAction("Темная тема", self)
+        lightTheme.triggered.connect(self.light_theme)
+        darkTheme.triggered.connect(self.dark_theme)
+        self.styleMenu.addAction(lightTheme)
+        self.styleMenu.addAction(darkTheme)
 
         createNewWind.triggered.connect(self.newWindDialog)
 
@@ -110,6 +118,8 @@ class App(QWidget):
         self.select_conditions_label = QLabel("Граничные условия")
         self.interpolation_method_label = QLabel("Интерполяция")
         self.work_zone = QLabel("Рабочая зона")
+        self.log_all = QLabel("Логгировать всё")
+        self.log_all_box = QCheckBox()
         self.work_zone_check = QCheckBox()
         self.work_zone.hide()
         self.work_zone_check.hide()
@@ -165,22 +175,24 @@ class App(QWidget):
         self.grid_layout.addWidget(self.select_conditions, 5, 3)
 
         self.grid_layout.addWidget(self.iterate_button, 6, 2)
-        self.grid_layout.addWidget(self.use_mpc, 6, 4)
-        self.grid_layout.addWidget(self.use_mpc_check, 6, 5)
+        self.grid_layout.addWidget(self.log_all, 6, 4)
+        self.grid_layout.addWidget(self.log_all_box, 6, 5)
+        self.grid_layout.addWidget(self.use_mpc, 7, 4)
+        self.grid_layout.addWidget(self.use_mpc_check, 7, 5)
         self.grid_layout.addWidget(self.check_cfl_label, 6, 6)
         self.grid_layout.addWidget(self.check_cfl_cb, 6, 7)
 
         self.grid_layout.addWidget(self.ok_button, 7, 2)
-        self.grid_layout.addWidget(self.substance_label, 7, 4)
-        self.grid_layout.addWidget(self.select_substance, 7, 5)
-        self.grid_layout.addWidget(self.update_c_label, 7, 4)
-        self.grid_layout.addWidget(self.update_c_radio, 7, 5)
+        self.grid_layout.addWidget(self.substance_label, 8, 4)
+        self.grid_layout.addWidget(self.select_substance, 8, 5)
+        self.grid_layout.addWidget(self.update_c_label, 8, 4)
+        self.grid_layout.addWidget(self.update_c_radio, 8, 5)
         self.grid_layout.addWidget(self.check_stable_lable, 7, 6)
         self.grid_layout.addWidget(self.check_stable_cb, 7, 7)
 
         self.grid_layout.addWidget(self.save_list, 8, 2)
-        self.grid_layout.addWidget(self.work_zone, 8, 4)
-        self.grid_layout.addWidget(self.work_zone_check, 8, 5)
+        self.grid_layout.addWidget(self.work_zone, 9, 4)
+        self.grid_layout.addWidget(self.work_zone_check, 9, 5)
 
         self.select_substance.hide()
         self.substance_label.hide()
@@ -196,15 +208,23 @@ class App(QWidget):
         self.x_size = self.y_size = self.x_step = self.y_step = self.Dx = self.Dy = self.u = self.v = self.t \
             = self.t_step = self.anim_int = self.freq = self.x = self.y = self.c = self.is_const_generation \
             = self.repeat_freq = self.condit_start = self.update_conc = self.sources = self.check_stable \
-            = self.check_cfl = self.conditions = None
+            = self.check_cfl = self.conditions = self.debug = None
 
         self.npz_exists = os.path.isfile("model.npz")
 
         self.mpc_use = False
 
+        self.sources_dict = {}
+
         self.main_layout.addLayout(self.grid_layout)
         self.setLayout(self.main_layout)
         self.show()
+
+    def light_theme(self):
+        self.load_stylesheet("style.qss")
+
+    def dark_theme(self):
+        self.load_stylesheet("style_dark.qss")
 
     def newWindDialog(self):
         dialog = WindRulesDialog()
@@ -274,6 +294,7 @@ class App(QWidget):
             self.freq = int(self.save_input.text())
             self.check_stable = bool(self.check_stable_cb.isChecked())
             self.check_cfl = bool(self.check_cfl_cb.isChecked())
+            self.debug = bool(self.log_all_box.isChecked())
             tmp = str(self.select_conditions.currentText())
             if tmp == "Дирихле":
                 self.conditions = "Dirihle"
@@ -286,17 +307,13 @@ class App(QWidget):
                 config_data = json.load(config)
                 if "sources" in config_data:
                     self.sources = config_data["sources"]
+                    for source in self.sources:
+                        key = f"{source['x']}, {source['y']}"
+                        value = f"{source['concentration']}, {source['frequency']}"
+                        self.sources_dict[key] = value
                 else:
                     logging.error("Invalid config format: must contain either 'x', 'y', 'c' or 'sources'")
 
-            self.condit_start = np.zeros((int(self.x_size), int(self.y_size)))
-            for source in self.sources:
-                x = int(source["x"])
-                y = int(source["y"])
-                c = float(source["concentration"])
-                self.repeat_freq = int(source["frequency"])
-                self.is_const_generation = True if self.repeat_freq != 0 else False
-                self.condit_start[x][y] = c
             self.update_conc = self.update_c_radio.isChecked()
 
             wind_file = "wind.json"
@@ -369,6 +386,7 @@ class App(QWidget):
             "update_conc": self.update_c_radio.isChecked(),
             "check_cfl": self.check_cfl_cb.isChecked(),
             "check_stability": self.check_stable_cb.isChecked(),
+            "log_all": self.log_all_box.isChecked()
         }
 
         file_path, _ = QFileDialog.getSaveFileName(
@@ -405,6 +423,7 @@ class App(QWidget):
                 self.update_c_radio.setChecked(bool(data.get("update_conc")))
                 self.check_stable_cb.setChecked(bool(data.get("check_stability")))
                 self.check_cfl_cb.setChecked(bool(data.get("check_cfl")))
+                self.log_all_box.setChecked(bool(data.get("log_all")))
 
                 if self.grid_layout not in self.main_layout.children():
                     self.main_layout.addLayout(self.grid_layout)
@@ -415,8 +434,10 @@ class App(QWidget):
 
     def iterate(self):
         self.get_params()
+
         try:
             model = Model(c_start=self.condit_start,
+                          sources=self.sources_dict,
                           x_size=self.x_size,
                           y_size=self.y_size,
                           t=int(self.t),
@@ -428,11 +449,11 @@ class App(QWidget):
                           u=self.u,
                           v=self.v,
                           slices_freq=self.freq,
-                          repeat_freq=self.repeat_freq,
                           repeat_start_conditions=self.is_const_generation,
                           conditions=self.conditions,
                           check_stable=self.check_stable,
-                          check_cfl=self.check_cfl)
+                          check_cfl=self.check_cfl,
+                          debug=self.debug)
             model.iterate()
             res = model.c_list
             np.savez("model.npz", res=res)

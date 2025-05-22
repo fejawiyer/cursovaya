@@ -1,3 +1,5 @@
+import json
+
 import numpy as np
 import time
 import logging
@@ -7,16 +9,16 @@ logger = logging.getLogger(__name__)
 
 
 class Model:
-    def __init__(self, c_start,
+    def __init__(self, c_start, sources: dict = None,
                  x_size=50.0, y_size=50.0,
                  t=30,
                  Dx=0.5, Dy=0.5,
                  dx=1, dy=1, dt=0.1,
                  u=0, v=0,
                  slices_freq=1,
-                 repeat_freq=-1,
                  repeat_start_conditions=False, check_stable=True, check_cfl=True,
-                 conditions="Dirihle"):
+                 conditions="Dirihle",
+                 debug=False):
         self.x_size = x_size
         self.y_size = y_size
         self.t = t
@@ -25,18 +27,28 @@ class Model:
         self.dx = dx
         self.dy = dy
         self.dt = dt
-        self.c = c_start
-        self.c_start = c_start
         self.repeat_start_conditions = repeat_start_conditions
         self.check_cfl = check_cfl
-        self.cfl = None
-        self.repeat_freq = repeat_freq
         self.x = np.linspace(0, x_size, int(x_size/dx))
         self.y = np.linspace(0, y_size, int(y_size/dy))
         self.X, self.Y = np.meshgrid(self.x, self.y)
+
+        self.is_u_float = False
+        self.is_u_dict = False
+        self.is_v_float = False
+        self.is_v_dict = False
+        self.sources = sources
+        self.n_sources = len(sources)
+        self.c = 0*self.X
+        for source_key, source_value in self.sources.items():
+            x, y = map(float, source_key.split(','))
+            concentration, repeat_freq = map(float, source_value.split(','))
+            self.c[int(x)][int(y)] = concentration
         if isinstance(u, int) or isinstance(u, float):
+            self.is_u_float = True
             self.u = u + 0 * self.X
         elif isinstance(u, dict):
+            self.is_u_dict = True
             if isinstance(u.get(0), str):
                 self.u = string_function_to_numpy(u.get(0), self.x) + 0 * self.X
             else:
@@ -47,8 +59,10 @@ class Model:
         else:
             self.u = u
         if isinstance(v, int) or isinstance(v, float):
+            self.is_v_float = True
             self.v = v + 0 * self.Y
         elif isinstance(v, dict):
+            self.is_v_dict = True
             if isinstance(v.get(0), str):
                 self.v = string_function_to_numpy(v.get(0), self.x) + 0 * self.Y
             else:
@@ -58,6 +72,15 @@ class Model:
             self.v_next_time = self.v_times[1] if len(self.v_times) > 1 else None
         else:
             self.v = v
+        self.max_conc = np.max(self.c)
+        self.slices_freq = slices_freq
+        self.time_steps = int(self.t / self.dt)
+        self.conditions = conditions
+        self.check_stable = check_stable
+        self.c_list = []
+        self.u_key_iter = 1
+        self.v_key_iter = 1
+        self.log() if debug else None
         logger.info("Modelling start")
         if check_cfl:
             self.cfl = dt * np.max(self.u) / dx + dt * np.max(
@@ -75,29 +98,46 @@ class Model:
                     if self.cfl <= 1:
                         logger.info("Success")
                         break
-        self.max_conc = np.max(self.c)
-        self.slices_freq = slices_freq
-        self.time_steps = int(self.t / self.dt)
 
-        logger.info(f"Wind X={self.u}")
-        logger.info(f"Wind Y={self.v}")
-        self.dynamic_wind_u = False
-        self.dynamic_wind_v = False
-        self.conditions = conditions
-        self.check_stable = check_stable
-        self.c_list = []
-        self.u_key_iter = 1
-        self.v_key_iter = 1
+    def log(self):
+        logger.info(f"Got params: x_size={self.x_size}, y_size={self.y_size}, t={self.t}, Dx={self.Dx}, Dy={self.Dy}")
+        logger.info(f"dx={self.dx}, dy={self.dy}, dt={self.dt}")
+        logger.info(f"is u wind float={self.is_u_float}")
+        logger.info(f"is u wind dict={self.is_u_dict}")
+        logger.info(f"is v wind float={self.is_v_float}")
+        logger.info(f"is v wind dict={self.is_v_dict}")
+        logger.info(f"sources_n={self.n_sources}")
+        logger.info(f"slices freq={self.slices_freq}")
+        logger.info(f"repeat start={self.repeat_start_conditions}")
+        logger.info(f"check stable={self.check_stable}")
+        logger.info(f"check cfl={self.check_cfl}")
+        logger.info(f"conditions={self.conditions}")
+        logger.info(f"sources={self.sources}")
 
     def iterate(self):
         start_time = time.time()
-        next_time = 1
         for t in range(self.time_steps):
-            cur_time = t * self.dt
             c_new = self.c.copy()
             c_new[1:-1, 1:-1] = self.Dx * (self.c[:-2, 1:-1] - 2 * self.c[1:-1, 1:-1] + self.c[2:, 1:-1]) / self.dx ** 2
             c_new[1:-1, 1:-1] += self.Dy * (
                     self.c[1:-1, :-2] - 2 * self.c[1:-1, 1:-1] + self.c[1:-1, 2:]) / self.dy ** 2
+
+            # Обработка источников
+            try:
+                for source_key, source_value in self.sources.items():
+                    # Разбираем координаты и параметры источника
+                    x, y = map(float, source_key.split(','))
+                    concentration, repeat_freq = map(float, source_value.split(','))
+                    # Проверяем, нужно ли добавлять источник на этом шаге
+                    if t % int(repeat_freq) == 0:
+                        # Находим ближайшие индексы к координатам x, y
+                        i = np.argmin(np.abs(self.x - x))
+                        j = np.argmin(np.abs(self.y - y))
+
+                        # Добавляем концентрацию в указанную точку
+                        c_new[i, j] += concentration
+            except Exception:
+                print("while source except")
 
             if self.v_next_time is not None and t == self.v_next_time:
                 if isinstance(self.v_rules.get(self.v_next_time), str):
@@ -161,16 +201,8 @@ class Model:
                 c_new[:, 0] = c_new[:, -2]  # Нижняя граница = предпоследний слой
                 c_new[:, -1] = c_new[:, 1]  # Верхняя граница = второй слой
 
-            if self.repeat_start_conditions:
-                if self.repeat_freq == -1:
-                    if cur_time >= next_time:
-                        c_new += self.c_start
-                        next_time += 1
-                else:
-                    if t % self.repeat_freq == 0:
-                        c_new += self.c_start
-
             self.c = c_new
+
             if np.max(self.c) > self.max_conc and not self.repeat_start_conditions and self.check_stable:
                 logger.warning("The solution differs.")
                 logger.info(np.max(self.c))
@@ -186,7 +218,6 @@ class Model:
         logger.info(f"Modelled {self.dt * self.time_steps} seconds")
         logger.info(f"Calculated {self.time_steps * len(self.x) * len(self.y)} elements")
         logger.info(f"Calculated {len(self.c_list)} layers")
-
 
 def string_function_to_numpy(func_str, x_values):
     """
