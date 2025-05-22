@@ -466,7 +466,7 @@ class App(QWidget):
             self.iterate()
         self.get_params()
         try:
-            zoning = True if self.interpolation_method.currentText() == "Билинейная интерполяция" else False
+            zoning = True if self.interpolation_method.currentText() == "Билинейная" else False
             if self.mpc_use:
                 plot = MPCAnimation(self.anim_int, self.is_const_generation, self.x_size, self.y_size,
                                     self.get_current_pdk(), zoning=zoning)
