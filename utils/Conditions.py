@@ -203,7 +203,7 @@ class NewConditions(QDialog):
 
         self.frequency_label = QLabel("Частота выбросов:")
         self.frequency_input = QSpinBox()
-        self.frequency_input.setRange(1, 1000)
+        self.frequency_input.setRange(0, 1000)
         self.frequency_input.setValue(1)
 
         self.save_button = QPushButton("Сохранить источник")

@@ -10,6 +10,7 @@ from utils.Model import Model
 from utils.Plotting import MPCAnimation, DefaultAnimation
 from utils.PDK_Table import SubstancesDialog
 from utils.Logs import LogViewerDialog
+from utils.Wind import WindRulesDialog
 from tkinter.messagebox import showerror
 
 
@@ -37,11 +38,16 @@ class App(QWidget):
         self.c_start = self.menuBar.addMenu('&Начальные условия')
         createNewCStart = QAction("Новые...", self)
 
+        self.wind_menu = self.menuBar.addMenu('&Ветер')
+        createNewWind = QAction("Новые правила...", self)
+
         self.pdk_table = self.menuBar.addMenu('&ПДК')
         checkPDK = QAction("Таблица", self)
 
         self.logsMenu = self.menuBar.addMenu('&Логи')
         checkLogs = QAction("Смотреть", self)
+
+        createNewWind.triggered.connect(self.newWindDialog)
 
         checkPDK.triggered.connect(self.pdk_table_dialog)
 
@@ -59,6 +65,8 @@ class App(QWidget):
 
         self.c_start.addAction(createNewCStart)
 
+        self.wind_menu.addAction(createNewWind)
+
         self.pdk_table.addAction(checkPDK)
 
         self.logsMenu.addAction(checkLogs)
@@ -69,79 +77,59 @@ class App(QWidget):
 
         self.x_size_label = QLabel("Введите размеры области в ширину (м)")
         self.x_size_input = QLineEdit()
-
         self.y_size_label = QLabel("Введите размеры области в длину (м)")
         self.y_size_input = QLineEdit()
-
         self.t_label = QLabel("Введите длительность моделирования (с)")
         self.t_input = QLineEdit()
-
         self.x_step_label = QLabel("Введите шаг по X (м)")
         self.x_step_input = QLineEdit()
-
         self.y_step_label = QLabel("Введите шаг по Y (м)")
         self.y_step_input = QLineEdit()
-
         self.t_step_label = QLabel("Введите шаг по времени (с)")
         self.t_step_input = QLineEdit()
-
         self.dx_label = QLabel("Введите коэф. диффузии вдоль X")
         self.dx_input = QLineEdit()
-
         self.dy_label = QLabel("Введите коэф. диффузии вдоль Y")
         self.dy_input = QLineEdit()
-
-        self.wind_u_label = QLabel("Введите средний ветер вдоль X")
-        self.wind_u_input = QLineEdit()
-
-        self.wind_v_label = QLabel("Введите средний ветер вдоль Y")
-        self.wind_v_input = QLineEdit()
-
         self.int_label = QLabel("Введите интервал анимации (мс)")
         self.int_input = QLineEdit()
-
         self.save_label = QLabel("Введите частоту сохранения")
         self.save_input = QLineEdit()
-
         self.iterate_button = QPushButton("Моделирование")
-
         self.ok_button = QPushButton("Просмотр")
-
         self.save_button = QPushButton("Сохранить")
-
         self.update_c_label = QLabel("Обновлять шкалу концентрации")
         self.update_c_radio = QCheckBox()
-
+        self.check_cfl_label = QLabel("Проверять CFL")
+        self.check_cfl_cb = QCheckBox()
+        self.check_stable_lable = QLabel("Проверять устойчивость")
+        self.check_stable_cb = QCheckBox()
         self.use_mpc = QLabel("Использовать ПДК")
         self.use_mpc_check = QCheckBox()
         self.use_mpc_check.stateChanged.connect(self.mpc_check)
-
+        self.select_conditions_label = QLabel("Граничные условия")
+        self.interpolation_method_label = QLabel("Интерполяция")
         self.work_zone = QLabel("Рабочая зона")
         self.work_zone_check = QCheckBox()
-
         self.work_zone.hide()
         self.work_zone_check.hide()
-
         self.substances_data = []
         self.substance_names = []
         self.load_substances()
         self.pdk_values = {sub['name']: sub['pdk'] for sub in self.substances_data}
         self.pdk_work_values = {sub['name']: sub['pdk_work'] for sub in self.substances_data}
-
         self.select_substance = QComboBox()
-
+        self.select_conditions = QComboBox()
         if hasattr(self, 'substance_names') and self.substance_names:
             self.select_substance.addItems(self.substance_names)
-        else:
-            self.select_substance.addItems(["Аммиак"])
-
+        self.select_conditions.addItems(["Дирихле", "Нейманн", "Шизофреников"])
         self.substance_label = QLabel("Вещество")
 
         self.save_list = QComboBox()
         self.save_list.addItems([".gif", ".html"])
 
         self.interpolation_method = QComboBox()
-        self.interpolation_method.addItems(["Ступенчатая интерполяция", "Билинейная интерполяция"])
+        self.interpolation_method.addItems(["Ступенчатая", "Билинейная"])
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
@@ -160,35 +148,39 @@ class App(QWidget):
         self.grid_layout.addWidget(self.t_step_label, 3, 6)
         self.grid_layout.addWidget(self.t_step_input, 3, 7)
 
-        self.grid_layout.addWidget(self.wind_u_label, 4, 2)
-        self.grid_layout.addWidget(self.wind_u_input, 4, 3)
-        self.grid_layout.addWidget(self.wind_v_label, 4, 4)
-        self.grid_layout.addWidget(self.wind_v_input, 4, 5)
         self.grid_layout.addWidget(self.int_label, 4, 6)
         self.grid_layout.addWidget(self.int_input, 4, 7)
 
-        self.grid_layout.addWidget(self.dx_label, 5, 2)
-        self.grid_layout.addWidget(self.dx_input, 5, 3)
-        self.grid_layout.addWidget(self.dy_label, 5, 4)
-        self.grid_layout.addWidget(self.dy_input, 5, 5)
+        self.grid_layout.addWidget(self.dx_label, 4, 2)
+        self.grid_layout.addWidget(self.dx_input, 4, 3)
+        self.grid_layout.addWidget(self.dy_label, 4, 4)
+        self.grid_layout.addWidget(self.dy_input, 4, 5)
+
         self.grid_layout.addWidget(self.save_label, 5, 6)
         self.grid_layout.addWidget(self.save_input, 5, 7)
 
-        self.grid_layout.addWidget(self.interpolation_method, 6, 4)
+        self.grid_layout.addWidget(self.interpolation_method_label, 5, 4)
+        self.grid_layout.addWidget(self.interpolation_method, 5, 5)
+        self.grid_layout.addWidget(self.select_conditions_label, 5, 2)
+        self.grid_layout.addWidget(self.select_conditions, 5, 3)
+
         self.grid_layout.addWidget(self.iterate_button, 6, 2)
+        self.grid_layout.addWidget(self.use_mpc, 6, 4)
+        self.grid_layout.addWidget(self.use_mpc_check, 6, 5)
+        self.grid_layout.addWidget(self.check_cfl_label, 6, 6)
+        self.grid_layout.addWidget(self.check_cfl_cb, 6, 7)
 
-        self.grid_layout.addWidget(self.use_mpc, 7, 4)
-        self.grid_layout.addWidget(self.use_mpc_check, 7, 5)
         self.grid_layout.addWidget(self.ok_button, 7, 2)
+        self.grid_layout.addWidget(self.substance_label, 7, 4)
+        self.grid_layout.addWidget(self.select_substance, 7, 5)
+        self.grid_layout.addWidget(self.update_c_label, 7, 4)
+        self.grid_layout.addWidget(self.update_c_radio, 7, 5)
+        self.grid_layout.addWidget(self.check_stable_lable, 7, 6)
+        self.grid_layout.addWidget(self.check_stable_cb, 7, 7)
 
-        self.grid_layout.addWidget(self.substance_label, 8, 4)
-        self.grid_layout.addWidget(self.select_substance, 8, 5)
-        self.grid_layout.addWidget(self.update_c_label, 8, 4)
-        self.grid_layout.addWidget(self.update_c_radio, 8, 5)
         self.grid_layout.addWidget(self.save_list, 8, 2)
-
-        self.grid_layout.addWidget(self.work_zone, 9, 4)
-        self.grid_layout.addWidget(self.work_zone_check, 9, 5)
+        self.grid_layout.addWidget(self.work_zone, 8, 4)
+        self.grid_layout.addWidget(self.work_zone_check, 8, 5)
 
         self.select_substance.hide()
         self.substance_label.hide()
@@ -203,14 +195,23 @@ class App(QWidget):
 
         self.x_size = self.y_size = self.x_step = self.y_step = self.Dx = self.Dy = self.u = self.v = self.t \
             = self.t_step = self.anim_int = self.freq = self.x = self.y = self.c = self.is_const_generation \
-            = self.repeat_freq = self.condit_start = self.update_conc = self.sources = None
+            = self.repeat_freq = self.condit_start = self.update_conc = self.sources = self.check_stable \
+            = self.check_cfl = self.conditions = None
 
         self.npz_exists = os.path.isfile("model.npz")
 
         self.mpc_use = False
 
+        self.main_layout.addLayout(self.grid_layout)
         self.setLayout(self.main_layout)
         self.show()
+
+    def newWindDialog(self):
+        dialog = WindRulesDialog()
+        if dialog.exec_() == QDialog.Accepted:
+            rules = dialog.get_rules()
+            self.u = dict(rules['wind_x'])
+            self.v = dict(rules['wind_y'])
 
     def check_logs(self):
         try:
@@ -254,8 +255,8 @@ class App(QWidget):
         try:
             with open('substances.json', 'r', encoding='utf-8') as file:
                 data = json.load(file)
-                self.substances_data = sorted(data['substances'], key=lambda x: x['name'].lower())
-                self.substance_names = sorted([sub['name'] for sub in self.substances_data], key=lambda x: x.lower())
+                self.substances_data = data['substances']
+                self.substance_names = [sub['name'] for sub in self.substances_data]
         except FileNotFoundError:
             logging.error("File substances.json is not found")
 
@@ -267,12 +268,19 @@ class App(QWidget):
             self.y_step = float(self.y_step_input.text())
             self.Dx = float(self.dx_input.text())
             self.Dy = float(self.dy_input.text())
-            self.u = float(self.wind_u_input.text())
-            self.v = float(self.wind_v_input.text())
             self.t = float(self.t_input.text())
             self.t_step = float(self.t_step_input.text())
             self.anim_int = int(self.int_input.text())
             self.freq = int(self.save_input.text())
+            self.check_stable = bool(self.check_stable_cb.isChecked())
+            self.check_cfl = bool(self.check_cfl_cb.isChecked())
+            tmp = str(self.select_conditions.currentText())
+            if tmp == "Дирихле":
+                self.conditions = "Dirihle"
+            elif tmp == "Нейманн":
+                self.conditions = "Neumann"
+            else:
+                self.conditions = "WTF"
             c_start_file = "parameters.json"
             with open(c_start_file.replace("/", "\\"), "r") as config:
                 config_data = json.load(config)
@@ -290,6 +298,16 @@ class App(QWidget):
                 self.is_const_generation = True if self.repeat_freq != 0 else False
                 self.condit_start[x][y] = c
             self.update_conc = self.update_c_radio.isChecked()
+
+            wind_file = "wind.json"
+            with open(wind_file.replace("/", "\\"), "r") as config:
+                config_data = json.load(config)
+                self.u = config_data["wind_x"]
+                self.u = {int(key): value for key, value in self.u.items()}
+                print(self.u)
+                self.v = config_data["wind_y"]
+                self.v = {int(key): value for key, value in self.v.items()}
+                print(self.v)
         except Exception as e:
             logging.error(f"{e}")
 
@@ -324,7 +342,6 @@ class App(QWidget):
 
     def newFileDialog(self):
         self.clear_layout(self.grid_layout)
-        self.main_layout.addLayout(self.grid_layout)
 
     def createNewConditions(self):
         dialog = NewConditions(self)
@@ -345,13 +362,13 @@ class App(QWidget):
             "y_step": self.y_step_input.text(),
             "t_step": self.t_step_input.text(),
             "dx": self.dx_input.text(),
-            "wind_v": self.wind_v_input.text(),
             "intensity": self.int_input.text(),
-            "wind_u": self.wind_u_input.text(),
             "dy": self.dy_input.text(),
             "save_name": self.save_input.text(),
             "initial_conditions": "parameters.json",
             "update_conc": self.update_c_radio.isChecked(),
+            "check_cfl": self.check_cfl_cb.isChecked(),
+            "check_stability": self.check_stable_cb.isChecked(),
         }
 
         file_path, _ = QFileDialog.getSaveFileName(
@@ -382,12 +399,12 @@ class App(QWidget):
                 self.y_step_input.setText(str(data.get("y_step", "")))
                 self.t_step_input.setText(str(data.get("t_step", "")))
                 self.dx_input.setText(str(data.get("dx", "")))
-                self.wind_v_input.setText(str(data.get("wind_v", "")))
                 self.int_input.setText(str(data.get("intensity", "")))
-                self.wind_u_input.setText(str(data.get("wind_u", "")))
                 self.dy_input.setText(str(data.get("dy", "")))
                 self.save_input.setText(str(data.get("save_name", "")))
                 self.update_c_radio.setChecked(bool(data.get("update_conc")))
+                self.check_stable_cb.setChecked(bool(data.get("check_stability")))
+                self.check_cfl_cb.setChecked(bool(data.get("check_cfl")))
 
                 if self.grid_layout not in self.main_layout.children():
                     self.main_layout.addLayout(self.grid_layout)
@@ -399,9 +416,23 @@ class App(QWidget):
     def iterate(self):
         self.get_params()
         try:
-            model = Model(self.condit_start, self.x_size, self.y_size, int(self.x_size), int(self.y_size), int(self.t),
-                          self.Dx, self.Dy, self.x_step, self.y_step, self.t_step, int(self.u), int(self.v), self.freq,
-                          repeat_freq=self.repeat_freq, repeat_start_conditions=self.is_const_generation)
+            model = Model(c_start=self.condit_start,
+                          x_size=self.x_size,
+                          y_size=self.y_size,
+                          t=int(self.t),
+                          Dx=self.Dx,
+                          Dy=self.Dy,
+                          dx=self.x_step,
+                          dy=self.y_step,
+                          dt=self.t_step,
+                          u=self.u,
+                          v=self.v,
+                          slices_freq=self.freq,
+                          repeat_freq=self.repeat_freq,
+                          repeat_start_conditions=self.is_const_generation,
+                          conditions=self.conditions,
+                          check_stable=self.check_stable,
+                          check_cfl=self.check_cfl)
             model.iterate()
             res = model.c_list
             np.savez("model.npz", res=res)
